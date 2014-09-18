@@ -66,9 +66,35 @@ typedef void (^SEReceivedNetworkDataBlock)(NSData *data);
     self.inputStream = tmpInputStream;
     self.outputStream = tmpOutStream;
 }
+
+
++ (void)networkRequestThreadEntryPoint:(id)__unused object {
+    @autoreleasepool {
+        [[NSThread currentThread] setName:@"SoketEngine"];
+        
+        NSRunLoop *runLoop = [NSRunLoop currentRunLoop];
+        [runLoop addPort:[NSMachPort port] forMode:NSDefaultRunLoopMode];
+        [runLoop run];
+    }
+}
+
++ (NSThread *)networkRequestThread {
+    static NSThread *_networkRequestThread = nil;
+    static dispatch_once_t oncePredicate;
+    dispatch_once(&oncePredicate, ^{
+        _networkRequestThread = [[NSThread alloc] initWithTarget:self selector:@selector(networkRequestThreadEntryPoint:) object:nil];
+        [_networkRequestThread start];
+    });
+    
+    return _networkRequestThread;
+}
 #pragma mark - public
 
-- (BOOL)connect {
+- (void)connect {
+    [self performSelector:@selector(socketDidConnect) onThread:[[self class] networkRequestThread] withObject:nil waitUntilDone:NO modes:@[NSRunLoopCommonModes]];
+}
+
+- (void)socketDidConnect {
     if (self.host) {
         [self setupSocketStreams];
         
@@ -80,10 +106,7 @@ typedef void (^SEReceivedNetworkDataBlock)(NSData *data);
         
         [self.inputStream open];
         [self.outputStream open];
-        
-        return YES;
     }
-    return NO;
 }
 
 - (void) sendNetworkPacket:(NSData *)data {
@@ -127,13 +150,19 @@ typedef void (^SEReceivedNetworkDataBlock)(NSData *data);
             if (len > 0) {
                 //Block
                 [_incomingDataBuffer appendBytes:buf length:len];
-                if (self.readingProgress) {
-                    self.readingProgress(len, [_incomingDataBuffer length]);
-                }
+                NSData *readingData = [NSData dataWithBytes:buf length:len];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (self.readingProgress) {
+                        self.readingProgress(len, [_incomingDataBuffer length]);
+                    }
+                    
+                    if (self.receivedNetworkData) {
+                        self.receivedNetworkData(readingData);
+                    }
+                });
+             
                 
-                if (self.receivedNetworkData) {
-                    self.receivedNetworkData([NSData dataWithBytes:buf length:len]);
-                }
+             
                 
             }else {
                 //Finished
@@ -141,9 +170,12 @@ typedef void (^SEReceivedNetworkDataBlock)(NSData *data);
                     [_incomingDataBuffer resetBytesInRange:NSMakeRange(0, _incomingDataBuffer.length)];
                     [_incomingDataBuffer setLength:0];
                 }
-                if (self.terminated) {
-                    self.terminated(nil);
-                }
+                
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (self.terminated) {
+                        self.terminated(nil);
+                    }
+                });
             }
         }
             break;
@@ -154,16 +186,20 @@ typedef void (^SEReceivedNetworkDataBlock)(NSData *data);
 		case NSStreamEventErrorOccurred: {
             NSLog(@"err %@",stream.streamError);
 			[self closeStream:stream];
-            if (self.terminated) {
-                self.terminated(stream.streamError);
-            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (self.terminated) {
+                    self.terminated(nil);
+                }
+            });
 		}
 			break;
 		case NSStreamEventEndEncountered: {
             [self closeStream:stream];
-            if (self.terminated) {
-                self.terminated(nil);
-            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (self.terminated) {
+                    self.terminated(nil);
+                }
+            });
 		}
             break;
 
@@ -194,9 +230,11 @@ typedef void (^SEReceivedNetworkDataBlock)(NSData *data);
             byteIndex += len;
         }else {
             [self closeStream:self.outputStream];
-            if (self.terminated) {
-                self.terminated(nil);
-            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (self.terminated) {
+                    self.terminated(nil);
+                }
+            });
         }
     }
 }

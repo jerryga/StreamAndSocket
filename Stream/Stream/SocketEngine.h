@@ -11,7 +11,7 @@
 @interface SocketEngine : NSObject
 
 - (id) initWithHostAddress:(NSString *)host andPort:(NSInteger)port;
-- (BOOL)connect;
+- (void)connect;
 - (void) sendNetworkPacket:(NSData *)data;
 
 - (void)setReadProgressBlock:(void (^)(unsigned int bytesReading, NSUInteger totalBytesReading))block ;
