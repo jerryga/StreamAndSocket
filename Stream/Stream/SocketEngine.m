@@ -188,7 +188,7 @@ typedef void (^SEReceivedNetworkDataBlock)(NSData *data);
 			[self closeStream:stream];
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (self.terminated) {
-                    self.terminated(nil);
+                    self.terminated(stream.streamError);
                 }
             });
 		}
@@ -218,13 +218,14 @@ typedef void (^SEReceivedNetworkDataBlock)(NSData *data);
     if ([self.outputStream hasSpaceAvailable]) {
         uint8_t *readBytes = (uint8_t *)[_outgoingDataBuffer mutableBytes];
         int byteIndex = 0;
-        readBytes += byteIndex; // instance variable to move pointer
+        readBytes += byteIndex;
         int data_len = [_outgoingDataBuffer length];
-        unsigned int len = ((data_len - byteIndex >= 1024) ?
-                            1024 : (data_len-byteIndex));
+        unsigned int len = ((data_len - byteIndex >= BUFSIZ) ?
+                            BUFSIZ : (data_len-byteIndex));
         uint8_t buf[len];
         (void)memcpy(buf, readBytes, len);
         len = [self.outputStream write:(const uint8_t *)buf maxLength:len];
+        NSLog(@"sss %d",len);
         if (len) {
             [_outgoingDataBuffer replaceBytesInRange:NSMakeRange(byteIndex, len) withBytes:NULL length:0];
             byteIndex += len;
